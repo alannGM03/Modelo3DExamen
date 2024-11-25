@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>three.js webgl - FBX loader</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        footer {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: #f0f0f0;
+        }
+
+        footer h1 {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="info">
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - FBXLoader<br />
+        Character and animation from <a href="https://www.mixamo.com/" target="_blank" rel="noopener">Mixamo</a>
+    </div>
+
+    <footer>
+        <h1 style="color: #f0f0f0;">Anochecer</h1>
+        <p style="color: #f0f0f0;">Alan González Mejía 22200352, Zagbi Jabnel Juárez Cruz 22200189</p>
+    </footer>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../build/three.module.js",
+                "three/addons/": "./jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import Stats from 'three/addons/libs/stats.module.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+
+        let camera, scene, renderer, stats, object, mixer, walkAction, moon;
+        const clock = new THREE.Clock();
+        const moveSpeed = 5; // Velocidad de movimiento
+        const rotationSpeed = Math.PI / 2; // Velocidad de rotación de personajes
+        const cameraRotationSpeed = Math.PI / 4; // Velocidad de rotación de cámara (45 grados por segundo)
+        const zoomSpeed = 50; // Velocidad de zoom
+        const keys = { W: false, A: false, S: false, D: false, T: false, G: false, F: false, H: false, Q: false, E: false }; // Teclas activas
+        let isWalking = false; // Estado de animación
+
+        init();
+
+        function init() {
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+
+            // Configuración de la cámara
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+            camera.position.set(100, 200, 300);
+
+            // Configuración de la escena
+            scene = new THREE.Scene();
+
+            // Fondo HDR
+            const rgbeLoader = new RGBELoader();
+            rgbeLoader.load('models/rgbe/playa.hdr', function (texture) {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                scene.background = texture;
+                scene.environment = texture;
+            });
+
+            // Iluminación
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x555555, 0.5);
+            hemiLight.position.set(0, 200, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            dirLight.position.set(0, 200, 100);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // Crear luna (objeto esférico)
+            const moonGeometry = new THREE.SphereGeometry(50, 32, 32);
+            const moonMaterial = new THREE.MeshBasicMaterial({
+                color: 0xeeeeee,  // Color de la luna (blanco)
+                emissive: 0xaaaaaa, // Brillo de la luna
+                emissiveIntensity: 1, // Intensidad del brillo
+            });
+            moon = new THREE.Mesh(moonGeometry, moonMaterial);
+            moon.position.set(0, 500, -1000); // Posicionar la luna en el fondo
+            scene.add(moon);
+
+            // Crear una fuente de luz que simule el brillo de la luna
+            const moonLight = new THREE.PointLight(0xffffff, 1, 2000);
+            moonLight.position.set(0, 500, -1000); // Posicionar la luz en la misma posición que la luna
+            scene.add(moonLight);
+
+            // Cargar modelo FBX
+            const loader = new FBXLoader();
+            loader.load('models/fbx/Start.fbx', function (group) {
+                object = group;
+                object.position.y = 0;
+
+                object.traverse(function (child) {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+
+                // Configuración del AnimationMixer
+                mixer = new THREE.AnimationMixer(object);
+
+                if (object.animations.length > 0) {
+                    walkAction = mixer.clipAction(object.animations[0]); // Supongamos que la animación de caminar es la primera
+                    walkAction.loop = THREE.LoopRepeat; // Repetir la animación
+                    walkAction.clampWhenFinished = false; // Evitar que la animación se detenga o "congele" al final
+                    walkAction.play(); // Iniciar la animación
+                }
+
+                scene.add(object);
+            });
+
+            // Renderizador
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // Controles de cámara
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.target.set(0, 100, 0);
+            controls.update();
+
+            // Eventos de teclado
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+
+            // Estadísticas
+            stats = new Stats();
+            container.appendChild(stats.dom);
+        }
+
+        function onKeyDown(event) {
+            switch (event.key.toLowerCase()) {
+                case 'w':
+                    keys.W = true;
+                    break;
+                case 'a':
+                    keys.A = true;
+                    break;
+                case 's':
+                    keys.S = true;
+                    break;
+                case 'd':
+                    keys.D = true;
+                    break;
+                case 't':
+                    keys.T = true;
+                    break;
+                case 'g':
+                    keys.G = true;
+                    break;
+                case 'f':
+                    keys.F = true;
+                    break;
+                case 'h':
+                    keys.H = true;
+                    break;
+                case 'q':
+                    keys.Q = true;
+                    break;
+                case 'e':
+                    keys.E = true;
+                    break;
+            }
+            updateWalkingState();
+        }
+
+        function onKeyUp(event) {
+            switch (event.key.toLowerCase()) {
+                case 'w':
+                    keys.W = false;
+                    break;
+                case 'a':
+                    keys.A = false;
+                    break;
+                case 's':
+                    keys.S = false;
+                    break;
+                case 'd':
+                    keys.D = false;
+                    break;
+                case 't':
+                    keys.T = false;
+                    break;
+                case 'g':
+                    keys.G = false;
+                    break;
+                case 'f':
+                    keys.F = false;
+                    break;
+                case 'h':
+                    keys.H = false;
+                    break;
+                case 'q':
+                    keys.Q = false;
+                    break;
+                case 'e':
+                    keys.E = false;
+                    break;
+            }
+            updateWalkingState();
+        }
+
+        function updateWalkingState() {
+            if (keys.W || keys.A || keys.S || keys.D) {
+                if (!isWalking && walkAction) {
+                    walkAction.play(); // Asegura que la animación siga jugando
+                    isWalking = true;
+                }
+            } else {
+                if (isWalking && walkAction) {
+                    walkAction.play(); // Mantiene la animación reproduciéndose
+                    isWalking = true;
+                }
+            }
+        }
+
+        function handleMovement(delta) {
+            if (!object) return;
+
+            const moveDistance = moveSpeed * delta;
+            const rotationDistance = rotationSpeed * delta;
+
+            if (keys.W) object.translateZ(-moveDistance); // Mover hacia adelante
+            if (keys.S) object.translateZ(moveDistance); // Mover hacia atrás
+            if (keys.A) object.rotation.y += rotationDistance; // Rotar hacia la izquierda
+            if (keys.D) object.rotation.y -= rotationDistance; // Rotar hacia la derecha
+        }
+
+        function handleCameraRotation(delta) {
+            const cameraRotation = cameraRotationSpeed * delta;
+
+            if (keys.T) camera.rotation.y -= cameraRotation; // Rotar cámara hacia la izquierda
+            if (keys.G) camera.rotation.y += cameraRotation; // Rotar cámara hacia la derecha
+        }
+
+        function handleZoom(delta) {
+            const zoomAdjustment = zoomSpeed * delta;
+
+            if (keys.Q) camera.position.z -= zoomAdjustment; // Acercar cámara al personaje
+            if (keys.E) camera.position.z += zoomAdjustment; // Alejar cámara del personaje
+        }
+
+        function animate() {
+            const delta = clock.getDelta();
+
+            // Actualizar animaciones
+            if (mixer) mixer.update(delta);
+
+            // Manejar movimiento, rotación de cámara y zoom
+            handleMovement(delta);
+            handleCameraRotation(delta);
+            handleZoom(delta);
+
+            renderer.render(scene, camera);
+            stats.update();
+        }
+
+        renderer.setAnimationLoop(animate);
+    </script>
+</body>
+</html>
+
